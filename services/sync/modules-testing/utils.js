@@ -8,16 +8,22 @@ this.EXPORTED_SYMBOLS = [
   "btoa", // It comes from a module import.
   "encryptPayload",
   "setBasicCredentials",
+  "makeIdentityConfig",
+  "configureFxAccountIdentity",
   "SyncTestingInfrastructure",
   "waitForZeroTimer",
+  "Promise", // from a module import
 ];
 
 const {utils: Cu} = Components;
 
 Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-crypto/utils.js");
+Cu.import("resource://services-sync/util.js");
 Cu.import("resource://testing-common/services-common/logging.js");
 Cu.import("resource://testing-common/services/sync/fakeservices.js");
+Cu.import("resource://gre/modules/FxAccounts.jsm");
+Cu.import("resource://gre/modules/Promise.jsm");
 
 /**
  * First wait >100ms (nsITimers can take up to that much time to fire, so
@@ -46,6 +52,77 @@ this.setBasicCredentials =
   auth.username = username;
   auth.basicPassword = password;
   auth.syncKey = syncKey;
+}
+
+// Return an identity configuration suitable for testing with our identity
+// providers.  |overrides| can specify overrides for any default values.
+this.makeIdentityConfig = function(overrides) {
+  // first setup the defaults.
+  let result = {
+    // Username used in both fxaccount and sync identity configs.
+    username: "foo",
+    // fxaccount specific credentials.
+    fxaccount: {
+      user: {
+        assertion: 'assertion',
+        email: 'email',
+        kA: 'kA',
+        kB: 'kB',
+        sessionToken: 'sessionToken',
+        uid: 'user_uid',
+      },
+      token: {
+        endpoint: Svc.Prefs.get("tokenServerURI"),
+        duration: 300,
+        id: "id",
+        key: "key",
+        // uid will be set to the username.
+      }
+    }
+    // XXX - todo - basic identity provider config
+  };
+  // Now handle any specified overrides.
+  if (overrides) {
+    if (overrides.username) {
+      result.username = overrides.username;
+    }
+    // XXX - todo - basic identity provider config
+    if (overrides.fxaccount) {
+      // TODO: allow just some attributes to be specified
+      result.fxaccount = overrides.fxaccount;
+    }
+    return result;
+}
+
+// Configure an instance of an FxAccount identity provider with the specified
+// config (or the default config if not specified).
+this.configureFxAccountIdentity = function(authService,
+                                           config = makeIdentityConfig()) {
+  let _MockFXA = function(blob) {
+    FxAccounts.call(this);
+    this.user = blob;
+  };
+  _MockFXA.prototype = {
+    __proto__: FxAccounts.prototype,
+    getSignedInUser: function getSignedInUser() {
+      let deferred = Promise.defer();
+      deferred.resolve(this.user);
+      return deferred.promise;
+    },
+  };
+  let mockFXA = new _MockFXA(config.fxaccount.user);
+
+  let mockTSC = { // TokenServerClient
+    getTokenFromBrowserIDAssertion: function(uri, assertion, cb) {
+      config.fxaccount.token.uid = config.username;
+      cb(null, config.fxaccount.token);
+    },
+  };
+  authService._fxaService = mockFXA;
+  authService._tokenServerClient = mockTSC;
+  // Set the "account" of the browserId manager to be the "email" of the
+  // logged in user of the mockFXA service.
+  authService._account = config.fxaccount.user.email;
 }
 
 this.SyncTestingInfrastructure = function (server, username, password, syncKey) {
