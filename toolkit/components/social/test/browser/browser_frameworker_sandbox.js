@@ -15,13 +15,20 @@ function makeWorkerUrl(runner) {
 
 var getFrameWorkerHandle;
 function test() {
+  requestLongerTimeout(2); // takes too long on ASAN test runs.
   waitForExplicitFinish();
 
   let scope = {};
   Cu.import("resource://gre/modules/FrameWorker.jsm", scope);
   getFrameWorkerHandle = scope.getFrameWorkerHandle;
 
-  runTests(tests);
+  // Keep a remote browser for the whole length of the test to avoid
+  // running into bug 919878 (or some unreported bug alot like it)
+  let keepAlive = getFrameWorkerHandle(makeWorkerUrl(function() {onconnect = function() {}}), undefined, "keep-alive");
+  runTests(tests, undefined, undefined, function() {
+    keepAlive.terminate();
+    finish();
+  });
 }
 
 let tests = {
