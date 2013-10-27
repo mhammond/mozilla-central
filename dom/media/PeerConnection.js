@@ -331,7 +331,7 @@ RTCPeerConnection.prototype = {
   /**
    * An RTCConfiguration looks like this:
    *
-   * { "iceServers": [ { url:"stun:23.21.150.121" },
+   * { "iceServers": [ { url:"stun:stun.example.org" },
    *                   { url:"turn:turn.example.org",
    *                     username:"jib", credential:"mypass"} ] }
    *
@@ -891,6 +891,7 @@ RTCError.prototype = {
 // This is a separate object because we don't want to expose it to DOM.
 function PeerConnectionObserver() {
   this._dompc = null;
+  this._guard = new WeakReferent(this);
 }
 PeerConnectionObserver.prototype = {
   classDescription: "PeerConnectionObserver",
@@ -1192,7 +1193,21 @@ PeerConnectionObserver.prototype = {
 
   getSupportedConstraints: function(dict) {
     return dict;
+  },
+
+  get weakReferent() {
+    return this._guard;
   }
+};
+
+// A PeerConnectionObserver member that c++ can do weak references on
+
+function WeakReferent(parent) {
+  this._parent = parent; // prevents parent from going away without us
+}
+WeakReferent.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
+                                         Ci.nsISupportsWeakReference]),
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(

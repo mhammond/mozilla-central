@@ -2636,7 +2636,7 @@ WorkerPrivateParent<Derived>::DispatchMessageEventToMessagePort(
   JSAutoCompartment(cx, sgo->GetGlobalJSObject());
 
   JS::Rooted<JS::Value> data(cx);
-  if (!buffer.read(cx, data.address(), WorkerStructuredCloneCallbacks(true))) {
+  if (!buffer.read(cx, &data, WorkerStructuredCloneCallbacks(true))) {
     return false;
   }
 
@@ -4646,7 +4646,8 @@ WorkerPrivate::SetTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp,
   // See if any of the optional arguments were passed.
   if (aArgc > 1) {
     double intervalMS = 0;
-    if (!JS_ValueToNumber(aCx, argv[1], &intervalMS)) {
+    JS::RootedValue interval(aCx, argv[1]);
+    if (!JS::ToNumber(aCx, interval, &intervalMS)) {
       return false;
     }
     newInfo->mInterval = TimeDuration::FromMilliseconds(intervalMS);

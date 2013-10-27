@@ -11,6 +11,7 @@ Cu.import('resource://gre/modules/AlarmService.jsm');
 Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import('resource://gre/modules/PermissionPromptHelper.jsm');
 Cu.import('resource://gre/modules/ObjectWrapper.jsm');
+Cu.import('resource://gre/modules/NotificationDB.jsm');
 Cu.import('resource://gre/modules/accessibility/AccessFu.jsm');
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
@@ -1258,24 +1259,82 @@ window.addEventListener('ContentStart', function update_onContentStart() {
 })();
 
 (function recordingStatusTracker() {
-  let gRecordingActiveCount = 0;
+  // Recording status is tracked per process with following data structure:
+  // {<processId>: {count: <N>,
+  //                requestURL: <requestURL>,
+  //                isApp: <isApp>,
+  //                audioCount: <N>,
+  //                videoCount: <N>}}
+  let gRecordingActiveProcesses = {};
 
-  Services.obs.addObserver(function(aSubject, aTopic, aData) {
-    let oldCount = gRecordingActiveCount;
-    if (aData == "starting") {
-      gRecordingActiveCount += 1;
-    } else if (aData == "shutdown") {
-      gRecordingActiveCount -= 1;
+  let recordingHandler = function(aSubject, aTopic, aData) {
+    let props = aSubject.QueryInterface(Ci.nsIPropertyBag2);
+    let processId = (props.hasKey('childID')) ? props.get('childID')
+                                              : 'main';
+    if (processId && !gRecordingActiveProcesses.hasOwnProperty(processId)) {
+      gRecordingActiveProcesses[processId] = {count: 0,
+                                              requestURL: props.get('requestURL'),
+                                              isApp: props.get('isApp'),
+                                              audioCount: 0,
+                                              videoCount: 0 };
     }
 
-    // We need to track changes from 1 <-> 0
-    if (gRecordingActiveCount + oldCount == 1) {
+    let currentActive = gRecordingActiveProcesses[processId];
+    let wasActive = (currentActive['count'] > 0);
+    let wasAudioActive = (currentActive['audioCount'] > 0);
+    let wasVideoActive = (currentActive['videoCount'] > 0);
+
+    switch (aData) {
+      case 'starting':
+        currentActive['count']++;
+        currentActive['audioCount'] += (props.get('isAudio')) ? 1 : 0;
+        currentActive['videoCount'] += (props.get('isVideo')) ? 1 : 0;
+        break;
+      case 'shutdown':
+        currentActive['count']--;
+        currentActive['audioCount'] -= (props.get('isAudio')) ? 1 : 0;
+        currentActive['videoCount'] -= (props.get('isVideo')) ? 1 : 0;
+        break;
+      case 'content-shutdown':
+        currentActive['count'] = 0;
+        currentActive['audioCount'] = 0;
+        currentActive['videoCount'] = 0;
+        break;
+    }
+
+    if (currentActive['count'] > 0) {
+      gRecordingActiveProcesses[processId] = currentActive;
+    } else {
+      delete gRecordingActiveProcesses[processId];
+    }
+
+    // We need to track changes if any active state is changed.
+    let isActive = (currentActive['count'] > 0);
+    let isAudioActive = (currentActive['audioCount'] > 0);
+    let isVideoActive = (currentActive['videoCount'] > 0);
+    if ((isActive != wasActive) ||
+        (isAudioActive != wasAudioActive) ||
+        (isVideoActive != wasVideoActive)) {
       shell.sendChromeEvent({
         type: 'recording-status',
-        active: (gRecordingActiveCount == 1)
+        active: isActive,
+        requestURL: currentActive['requestURL'],
+        isApp: currentActive['isApp'],
+        isAudio: isAudioActive,
+        isVideo: isVideoActive
       });
     }
-}, "recording-device-events", false);
+  };
+  Services.obs.addObserver(recordingHandler, 'recording-device-events', false);
+  Services.obs.addObserver(recordingHandler, 'recording-device-ipc-events', false);
+
+  Services.obs.addObserver(function(aSubject, aTopic, aData) {
+    // send additional recording events if content process is being killed
+    let processId = aSubject.QueryInterface(Ci.nsIPropertyBag2).get('childID');
+    if (gRecordingActiveProcesses.hasOwnProperty(processId)) {
+      Services.obs.notifyObservers(aSubject, 'recording-device-ipc-events', 'content-shutdown');
+    }
+  }, 'ipc:content-shutdown', false);
 })();
 
 (function volumeStateTracker() {
@@ -1286,16 +1345,6 @@ window.addEventListener('ContentStart', function update_onContentStart() {
     });
 }, 'volume-state-changed', false);
 })();
-
-Services.obs.addObserver(function(aSubject, aTopic, aData) {
-  let data = JSON.parse(aData);
-  shell.sendChromeEvent({
-    type: "activity-done",
-    success: data.success,
-    manifestURL: data.manifestURL,
-    pageURL: data.pageURL
-  });
-}, "activity-done", false);
 
 #ifdef MOZ_WIDGET_GONK
 // Devices don't have all the same partition size for /cache where we

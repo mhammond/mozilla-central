@@ -2677,6 +2677,14 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
         OnValueChanged(!mParserCreating);
       }
 
+      // Call parent's SetAttr for color input so its control frame is notified
+      // and updated
+      if (mType == NS_FORM_INPUT_COLOR) {
+        return nsGenericHTMLFormElement::SetAttr(kNameSpaceID_None,
+                                                 nsGkAtoms::value, aValue,
+                                                 true);
+      }
+
       return NS_OK;
     }
 
@@ -3172,8 +3180,7 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   }
   if (IsSingleLineTextControl(false) &&
       aVisitor.mEvent->message == NS_MOUSE_CLICK &&
-      aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
-      static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
+      aVisitor.mEvent->AsMouseEvent()->button ==
         WidgetMouseEvent::eMiddleButton) {
     aVisitor.mEvent->mFlags.mNoContentDispatch = false;
   }
@@ -3487,7 +3494,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
           // just because we raised a window.
           nsIFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm && IsSingleLineTextControl(false) &&
-              !(static_cast<InternalFocusEvent*>(aVisitor.mEvent))->fromRaise &&
+              !aVisitor.mEvent->AsFocusEvent()->fromRaise &&
               SelectTextFieldOnFocus()) {
             nsIDocument* document = GetCurrentDoc();
             if (document) {
@@ -3510,9 +3517,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
         {
           // For backwards compat, trigger checks/radios/buttons with
           // space or enter (bug 25300)
-          WidgetKeyboardEvent* keyEvent =
-            static_cast<WidgetKeyboardEvent*>(aVisitor.mEvent);
-
+          WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
           if ((aVisitor.mEvent->message == NS_KEY_PRESS &&
                keyEvent->keyCode == NS_VK_RETURN) ||
               (aVisitor.mEvent->message == NS_KEY_UP &&
@@ -3533,6 +3538,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
               case NS_FORM_INPUT_RESET:
               case NS_FORM_INPUT_SUBMIT:
               case NS_FORM_INPUT_IMAGE: // Bug 34418
+              case NS_FORM_INPUT_COLOR:
               {
                 WidgetMouseEvent event(aVisitor.mEvent->mFlags.mIsTrusted,
                                        NS_MOUSE_CLICK, nullptr,
@@ -3676,11 +3682,9 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
         {
           // cancel all of these events for buttons
           //XXXsmaug Why?
-          if (aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
-              (static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
-                 WidgetMouseEvent::eMiddleButton ||
-               static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
-                 WidgetMouseEvent::eRightButton)) {
+          WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
+          if (mouseEvent->button == WidgetMouseEvent::eMiddleButton ||
+              mouseEvent->button == WidgetMouseEvent::eRightButton) {
             if (mType == NS_FORM_INPUT_BUTTON ||
                 mType == NS_FORM_INPUT_RESET ||
                 mType == NS_FORM_INPUT_SUBMIT) {
@@ -3791,8 +3795,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
       if (nsIPresShell::GetCapturingContent()) {
         break; // don't start drag if someone else is already capturing
       }
-      WidgetInputEvent* inputEvent =
-        static_cast<WidgetInputEvent*>(aVisitor.mEvent);
+      WidgetInputEvent* inputEvent = aVisitor.mEvent->AsInputEvent();
       if (inputEvent->IsShift() || inputEvent->IsControl() ||
           inputEvent->IsAlt() || inputEvent->IsMeta() ||
           inputEvent->IsAltGraph() || inputEvent->IsFn() ||
@@ -3800,17 +3803,14 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
         break; // ignore
       }
       if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN) {
-        WidgetMouseEvent* mouseEvent =
-          static_cast<WidgetMouseEvent*>(aVisitor.mEvent);
-        if (mouseEvent->buttons == WidgetMouseEvent::eLeftButtonFlag) {
+        if (aVisitor.mEvent->AsMouseEvent()->buttons ==
+              WidgetMouseEvent::eLeftButtonFlag) {
           StartRangeThumbDrag(inputEvent);
         } else if (mIsDraggingRange) {
           CancelRangeThumbDrag();
         }
       } else {
-        WidgetTouchEvent* touchEvent =
-          static_cast<WidgetTouchEvent*>(aVisitor.mEvent);
-        if (touchEvent->touches.Length() == 1) {
+        if (aVisitor.mEvent->AsTouchEvent()->touches.Length() == 1) {
           StartRangeThumbDrag(inputEvent);
         } else if (mIsDraggingRange) {
           CancelRangeThumbDrag();
@@ -3830,8 +3830,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
         break;
       }
       SetValueOfRangeForUserEvent(
-        rangeFrame->GetValueAtEventPoint(
-          static_cast<WidgetInputEvent*>(aVisitor.mEvent)));
+        rangeFrame->GetValueAtEventPoint(aVisitor.mEvent->AsInputEvent()));
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
       break;
 
@@ -3844,14 +3843,13 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
       // call CancelRangeThumbDrag() if that is the case. We just finish off
       // the drag and set our final value (unless someone has called
       // preventDefault() and prevents us getting here).
-      FinishRangeThumbDrag(static_cast<WidgetInputEvent*>(aVisitor.mEvent));
+      FinishRangeThumbDrag(aVisitor.mEvent->AsInputEvent());
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
       break;
 
     case NS_KEY_PRESS:
       if (mIsDraggingRange &&
-          static_cast<WidgetKeyboardEvent*>(aVisitor.mEvent)->keyCode ==
-            NS_VK_ESCAPE) {
+          aVisitor.mEvent->AsKeyboardEvent()->keyCode == NS_VK_ESCAPE) {
         CancelRangeThumbDrag();
       }
       break;

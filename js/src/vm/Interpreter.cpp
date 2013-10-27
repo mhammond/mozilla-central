@@ -266,7 +266,7 @@ GetPropertyOperation(JSContext *cx, StackFrame *fp, HandleScript script, jsbytec
 
 #if JS_HAS_NO_SUCH_METHOD
     if (op == JSOP_CALLPROP &&
-        JS_UNLIKELY(vp.isPrimitive()) &&
+        JS_UNLIKELY(vp.isUndefined()) &&
         wasObject)
     {
         if (!OnUnknownMethod(cx, obj, IdToValue(id), vp))
@@ -396,7 +396,7 @@ js::RunScript(JSContext *cx, RunState &state)
         if (status == jit::Method_Error)
             return false;
         if (status == jit::Method_Compiled) {
-            jit::IonExecStatus status = jit::Cannon(cx, state);
+            jit::IonExecStatus status = jit::IonCannon(cx, state);
             return !IsErrorStatus(status);
         }
     }
@@ -2489,7 +2489,7 @@ BEGIN_CASE(JSOP_FUNCALL)
             if (status == jit::Method_Error)
                 goto error;
             if (status == jit::Method_Compiled) {
-                jit::IonExecStatus exec = jit::Cannon(cx, state);
+                jit::IonExecStatus exec = jit::IonCannon(cx, state);
                 CHECK_BRANCH();
                 regs.sp = args.spAfterCall();
                 interpReturnOK = !IsErrorStatus(exec);
@@ -3453,7 +3453,7 @@ js::CallProperty(JSContext *cx, HandleValue v, HandlePropertyName name, MutableH
         return false;
 
 #if JS_HAS_NO_SUCH_METHOD
-    if (JS_UNLIKELY(vp.isPrimitive()) && v.isObject())
+    if (JS_UNLIKELY(vp.isUndefined()) && v.isObject())
     {
         RootedObject obj(cx, &v.toObject());
         if (!OnUnknownMethod(cx, obj, StringValue(name), vp))

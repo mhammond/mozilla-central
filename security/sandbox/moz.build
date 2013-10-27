@@ -4,13 +4,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+FAIL_ON_WARNINGS = True
+
 MODULE = 'sandbox'
 
 EXPORTS.mozilla += [
     'Sandbox.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'Sandbox.cpp',
 ]
 
@@ -19,4 +21,6 @@ LIBXUL_LIBRARY = True
 LIBRARY_NAME = 'sandbox_s'
 
 EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

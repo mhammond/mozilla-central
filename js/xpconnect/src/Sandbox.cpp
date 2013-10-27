@@ -421,8 +421,7 @@ CloneNonReflectors(JSContext *cx, MutableHandleValue val)
     }
 
     // Now recreate the clones in the target compartment.
-    RootedValue rval(cx);
-    if (!buffer.read(cx, val.address(),
+    if (!buffer.read(cx, val,
         &gForwarderStructuredCloneCallbacks,
         &rootedReflectors))
     {
@@ -556,6 +555,34 @@ EvalInWindow(JSContext *cx, unsigned argc, jsval *vp)
 
     return true;
 }
+
+namespace xpc {
+static bool
+CreateObjectIn(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() < 1) {
+        JS_ReportError(cx, "Function requires at least 1 argument");
+        return false;
+    }
+
+    RootedObject optionsObj(cx);
+    bool calledWithOptions = args.length() > 1;
+    if (calledWithOptions) {
+        if (!args[1].isObject()) {
+            JS_ReportError(cx, "Expected the 2nd argument (options) to be an object");
+            return false;
+        }
+        optionsObj = &args[1].toObject();
+    }
+
+    CreateObjectInOptions options(cx, optionsObj);
+    if (calledWithOptions && !options.Parse())
+        return false;
+
+    return xpc::CreateObjectIn(cx, args[0], options, args.rval());
+}
+} /* namespace xpc */
 
 static bool
 sandbox_enumerate(JSContext *cx, HandleObject obj)
@@ -1059,7 +1086,8 @@ xpc::CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandb
 
         if (options.wantExportHelpers &&
             (!JS_DefineFunction(cx, sandbox, "exportFunction", ExportFunction, 3, 0) ||
-             !JS_DefineFunction(cx, sandbox, "evalInWindow", EvalInWindow, 2, 0)))
+             !JS_DefineFunction(cx, sandbox, "evalInWindow", EvalInWindow, 2, 0) ||
+             !JS_DefineFunction(cx, sandbox, "createObjectIn", CreateObjectIn, 2, 0)))
             return NS_ERROR_XPC_UNEXPECTED;
 
         if (!options.globalProperties.Define(cx, sandbox))
@@ -1253,13 +1281,16 @@ GetExpandedPrincipal(JSContext *cx, HandleObject arrayObj, nsIExpandedPrincipal 
  * Helper that tries to get a property form the options object.
  */
 bool
-OptionsBase::ParseValue(const char *name, MutableHandleValue prop, bool *found)
+OptionsBase::ParseValue(const char *name, MutableHandleValue prop, bool *aFound)
 {
-    MOZ_ASSERT(found);
-    bool ok = JS_HasProperty(mCx, mObject, name, found);
+    bool found;
+    bool ok = JS_HasProperty(mCx, mObject, name, &found);
     NS_ENSURE_TRUE(ok, false);
 
-    if (!*found)
+    if (aFound)
+        *aFound = found;
+
+    if (!found)
         return true;
 
     return JS_GetProperty(mCx, mObject, name, prop);
@@ -1337,6 +1368,23 @@ OptionsBase::ParseString(const char *name, nsCString &prop)
 }
 
 /*
+ * Helper that tries to get jsid property form the options object.
+ */
+bool
+OptionsBase::ParseId(const char *name, MutableHandleId prop)
+{
+    RootedValue value(mCx);
+    bool found;
+    bool ok = ParseValue(name, &value, &found);
+    NS_ENSURE_TRUE(ok, false);
+
+    if (!found)
+        return true;
+
+    return JS_ValueToId(mCx, value, prop.address());
+}
+
+/*
  * Helper that tries to get a list of DOM constructors and other helpers from the options object.
  */
 bool
@@ -1369,7 +1417,6 @@ SandboxOptions::ParseGlobalProperties()
 bool
 SandboxOptions::Parse()
 {
-    bool found;
     return ParseObject("sandboxPrototype", &proto) &&
            ParseBoolean("wantXrays", &wantXrays) &&
            ParseBoolean("wantComponents", &wantComponents) &&
@@ -1377,7 +1424,7 @@ SandboxOptions::Parse()
            ParseString("sandboxName", sandboxName) &&
            ParseObject("sameZoneAs", &sameZoneAs) &&
            ParseGlobalProperties() &&
-           ParseValue("metadata", &metadata, &found);
+           ParseValue("metadata", &metadata);
 }
 
 static nsresult
@@ -1717,7 +1764,7 @@ xpc::SetSandboxMetadata(JSContext *cx, HandleObject sandbox, HandleValue metadat
     RootedValue metadata(cx);
 
     JSAutoCompartment ac(cx, sandbox);
-    if (!JS_StructuredClone(cx, metadataArg, metadata.address(), nullptr, nullptr))
+    if (!JS_StructuredClone(cx, metadataArg, &metadata, nullptr, nullptr))
         return NS_ERROR_UNEXPECTED;
 
     JS_SetReservedSlot(sandbox, XPCONNECT_SANDBOX_CLASS_METADATA_SLOT, metadata);

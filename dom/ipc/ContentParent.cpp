@@ -1936,18 +1936,6 @@ ContentParent::RecvBroadcastVolume(const nsString& aVolumeName)
 }
 
 bool
-ContentParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus)
-{
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-        obs->NotifyObservers(nullptr, "recording-device-events", aRecordingStatus.get());
-    } else {
-        NS_WARNING("Could not get the Observer service for ContentParent::RecvRecordingDeviceEvents.");
-    }
-    return true;
-}
-
-bool
 ContentParent::SendNuwaFork()
 {
     if (this != sNuwaProcess) {

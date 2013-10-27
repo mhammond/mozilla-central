@@ -261,11 +261,11 @@ JS_ConvertArgumentsVA(JSContext *cx, unsigned argc, jsval *argv, const char *for
                 return false;
             break;
           case 'd':
-            if (!JS_ValueToNumber(cx, *sp, va_arg(ap, double *)))
+            if (!ToNumber(cx, arg, va_arg(ap, double *)))
                 return false;
             break;
           case 'I':
-            if (!JS_ValueToNumber(cx, *sp, &d))
+            if (!ToNumber(cx, arg, &d))
                 return false;
             *va_arg(ap, double *) = ToInteger(d);
             break;
@@ -356,7 +356,7 @@ JS_ConvertValue(JSContext *cx, HandleValue value, JSType type, MutableHandleValu
             vp.setString(str);
         break;
       case JSTYPE_NUMBER:
-        ok = JS_ValueToNumber(cx, value, &d);
+        ok = ToNumber(cx, value, &d);
         if (ok)
             vp.setDouble(d);
         break;
@@ -427,13 +427,6 @@ JS_ValueToSource(JSContext *cx, jsval valueArg)
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, value);
     return ValueToSource(cx, value);
-}
-
-JS_PUBLIC_API(bool)
-JS_ValueToNumber(JSContext *cx, jsval valueArg, double *dp)
-{
-    RootedValue value(cx, valueArg);
-    return JS::ToNumber(cx, value, dp);
 }
 
 JS_PUBLIC_API(bool)
@@ -1021,6 +1014,22 @@ JS_PUBLIC_API(uint32_t)
 JS_SetOptions(JSContext *cx, uint32_t options)
 {
     return SetOptionsCommon(cx, options);
+}
+
+JS_PUBLIC_API(uint32_t)
+JS_DisableOptions(JSContext *cx, uint32_t options)
+{
+    unsigned oldopts = GetOptionsCommon(cx);
+    unsigned newopts = oldopts & ~options;
+    return SetOptionsCommon(cx, newopts);
+}
+
+JS_PUBLIC_API(uint32_t)
+JS_EnableOptions(JSContext *cx, uint32_t options)
+{
+    unsigned oldopts = GetOptionsCommon(cx);
+    unsigned newopts = oldopts | options;
+    return SetOptionsCommon(cx, newopts);
 }
 
 JS_PUBLIC_API(uint32_t)
@@ -4473,7 +4482,7 @@ JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options, const char 
     AutoFile file;
     if (!file.open(cx, filename))
         return nullptr;
-    options = options.setFileAndLine(filename, 1);
+    options.setFileAndLine(filename, 1);
     JSScript *script = Compile(cx, obj, options, file.fp());
     return script;
 }
@@ -4538,6 +4547,11 @@ JS::FinishOffThreadScript(JSContext *maybecx, JSRuntime *rt, void *token)
 {
 #ifdef JS_WORKER_THREADS
     JS_ASSERT(CurrentThreadCanAccessRuntime(rt));
+
+    Maybe<AutoLastFrameCheck> lfc;
+    if (maybecx)
+        lfc.construct(maybecx);
+
     return rt->workerThreadState->finishParseTask(maybecx, rt, token);
 #else
     MOZ_ASSUME_UNREACHABLE("Off thread compilation is not available.");
@@ -6085,7 +6099,24 @@ JS_SetGlobalJitCompilerOption(JSContext *cx, JSJitCompilerOption opt, uint32_t v
         if (value == 0)
             jit::js_IonOptions.setEagerCompilation();
         break;
-
+      case JSJITCOMPILER_ION_ENABLE:
+        if (value == 1) {
+            JS_EnableOptions(cx, JSOPTION_ION);
+            IonSpew(js::jit::IonSpew_Scripts, "Enable ion");
+        } else if (value == 0) {
+            JS_DisableOptions(cx, JSOPTION_ION);
+            IonSpew(js::jit::IonSpew_Scripts, "Disable ion");
+        }
+        break;
+      case JSJITCOMPILER_BASELINE_ENABLE:
+        if (value == 1) {
+            JS_EnableOptions(cx, JSOPTION_BASELINE);
+            IonSpew(js::jit::IonSpew_BaselineScripts, "Enable baseline");
+        } else if (value == 0) {
+            JS_DisableOptions(cx, JSOPTION_BASELINE);
+            IonSpew(js::jit::IonSpew_BaselineScripts, "Disable baseline");
+        }
+        break;
       default:
         break;
     }
@@ -6270,6 +6301,12 @@ JS_PreventExtensions(JSContext *cx, JS::HandleObject obj)
     if (!extensible)
         return true;
     return JSObject::preventExtensions(cx, obj);
+}
+
+JS_PUBLIC_API(void)
+JS::SetAsmJSCacheOps(JSRuntime *rt, const JS::AsmJSCacheOps *ops)
+{
+    rt->asmJSCacheOps = *ops;
 }
 
 char *

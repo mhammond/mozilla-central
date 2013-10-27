@@ -224,6 +224,12 @@ class AutoArrayRooter : private AutoGCRooter {
 template<class T>
 class AutoVectorRooter : protected AutoGCRooter
 {
+    typedef js::Vector<T, 8> VectorImpl;
+    VectorImpl vector;
+
+    /* Prevent overwriting of inline elements in vector. */
+    js::SkipRoot vectorRoot;
+
   public:
     explicit AutoVectorRooter(JSContext *cx, ptrdiff_t tag
                               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -240,6 +246,7 @@ class AutoVectorRooter : protected AutoGCRooter
     }
 
     typedef T ElementType;
+    typedef typename VectorImpl::Range Range;
 
     size_t length() const { return vector.length(); }
     bool empty() const { return vector.empty(); }
@@ -299,6 +306,8 @@ class AutoVectorRooter : protected AutoGCRooter
     const T *end() const { return vector.end(); }
     T *end() { return vector.end(); }
 
+    Range all() { return vector.all(); }
+
     const T &back() const { return vector.back(); }
 
     friend void AutoGCRooter::trace(JSTracer *trc);
@@ -309,12 +318,6 @@ class AutoVectorRooter : protected AutoGCRooter
         for (size_t i = oldLength; i < vector.length(); ++i, ++t)
             memset(t, 0, sizeof(T));
     }
-
-    typedef js::Vector<T, 8> VectorImpl;
-    VectorImpl vector;
-
-    /* Prevent overwriting of inline elements in vector. */
-    js::SkipRoot vectorRoot;
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
@@ -335,6 +338,7 @@ class AutoHashMapRooter : protected AutoGCRooter
 
     typedef Key KeyType;
     typedef Value ValueType;
+    typedef typename HashMapImpl::Entry Entry;
     typedef typename HashMapImpl::Lookup Lookup;
     typedef typename HashMapImpl::Ptr Ptr;
     typedef typename HashMapImpl::AddPtr AddPtr;
@@ -1040,9 +1044,6 @@ JS_ValueToString(JSContext *cx, jsval v);
 
 extern JS_PUBLIC_API(JSString *)
 JS_ValueToSource(JSContext *cx, jsval v);
-
-extern JS_PUBLIC_API(bool)
-JS_ValueToNumber(JSContext *cx, jsval v, double *dp);
 
 namespace js {
 /*
@@ -3472,7 +3473,7 @@ class JS_PUBLIC_API(CompileOptions)
     }
     CompileOptions &setSourceMapURL(const jschar *s) { sourceMapURL = s; return *this; }
     CompileOptions &setColumn(unsigned c) { column = c; return *this; }
-    CompileOptions &setElement(Handle<JSObject*> e) { element = e; return *this; }
+    CompileOptions &setElement(Handle<JSObject*> e) { element.repoint(e); return *this; }
     CompileOptions &setCompileAndGo(bool cng) { compileAndGo = cng; return *this; }
     CompileOptions &setForEval(bool eval) { forEval = eval; return *this; }
     CompileOptions &setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
@@ -4426,7 +4427,9 @@ JS_SetParallelIonCompilationEnabled(JSContext *cx, bool enabled);
 
 #define JIT_COMPILER_OPTIONS(Register)                             \
   Register(BASELINE_USECOUNT_TRIGGER, "baseline.usecount.trigger") \
-  Register(ION_USECOUNT_TRIGGER, "ion.usecount.trigger")
+  Register(ION_USECOUNT_TRIGGER, "ion.usecount.trigger")           \
+  Register(ION_ENABLE, "ion.enable")                               \
+  Register(BASELINE_ENABLE, "baseline.enable")
 
 typedef enum JSJitCompilerOption {
 #define JIT_COMPILER_DECLARE(key, str) \
@@ -4486,5 +4489,59 @@ JS_DecodeScript(JSContext *cx, const void *data, uint32_t length,
 extern JS_PUBLIC_API(JSObject *)
 JS_DecodeInterpretedFunction(JSContext *cx, const void *data, uint32_t length,
                              JSPrincipals *principals, JSPrincipals *originPrincipals);
+
+namespace JS {
+
+/*
+ * This callback represents a request by the JS engine to open for reading the
+ * existing cache entry for the given global. If a cache entry exists, the
+ * callback shall return 'true' and return the size, base address and an opaque
+ * file handle as outparams. If the callback returns 'true', the JS engine
+ * guarantees a call to CloseAsmJSCacheEntryForReadOp, passing the same base
+ * address, size and handle.
+ */
+typedef bool
+(* OpenAsmJSCacheEntryForReadOp)(HandleObject global, size_t *size, const uint8_t **memory,
+                                 intptr_t *handle);
+typedef void
+(* CloseAsmJSCacheEntryForReadOp)(HandleObject global, size_t size, const uint8_t *memory,
+                                  intptr_t handle);
+
+/*
+ * This callback represents a request by the JS engine to open for writing a
+ * cache entry of the given size for the given global. If cache entry space is
+ * available, the callback shall return 'true' and return the base address and
+ * an opaque file handle as outparams. If the callback returns 'true', the JS
+ * engine guarantees a call to CloseAsmJSCacheEntryForWriteOp passing the same
+ * base address, size and handle.
+ */
+typedef bool
+(* OpenAsmJSCacheEntryForWriteOp)(HandleObject global, size_t size, uint8_t **memory,
+                                  intptr_t *handle);
+typedef void
+(* CloseAsmJSCacheEntryForWriteOp)(HandleObject global, size_t size, uint8_t *memory,
+                                   intptr_t handle);
+
+// Return the buildId (represented as a sequence of characters) associated with
+// the currently-executing build. If the JS engine is embedded such that a
+// single cache entry can be observed by different compiled versions of the JS
+// engine, it is critical that the buildId shall change for each new build of
+// the JS engine.
+typedef bool
+(* BuildIdOp)(mozilla::Vector<char> *buildId);
+
+struct AsmJSCacheOps
+{
+    OpenAsmJSCacheEntryForReadOp openEntryForRead;
+    CloseAsmJSCacheEntryForReadOp closeEntryForRead;
+    OpenAsmJSCacheEntryForWriteOp openEntryForWrite;
+    CloseAsmJSCacheEntryForWriteOp closeEntryForWrite;
+    BuildIdOp buildId;
+};
+
+extern JS_PUBLIC_API(void)
+SetAsmJSCacheOps(JSRuntime *rt, const AsmJSCacheOps *callbacks);
+
+} /* namespace JS */
 
 #endif /* jsapi_h */

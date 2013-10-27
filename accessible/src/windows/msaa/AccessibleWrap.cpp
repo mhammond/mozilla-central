@@ -896,7 +896,12 @@ AccessibleWrap::accNavigate(
     return CO_E_OBJNOTCONNECTED;
 
   Accessible* navAccessible = nullptr;
-  int32_t xpRelation = -1;
+  Maybe<RelationType> xpRelation;
+
+#define RELATIONTYPE(geckoType, stringType, atkType, msaaType, ia2Type) \
+  case msaaType: \
+    xpRelation.construct(RelationType::geckoType); \
+    break;
 
   switch(navDir) {
     case NAVDIR_FIRSTCHILD:
@@ -920,66 +925,18 @@ AccessibleWrap::accNavigate(
       return E_NOTIMPL;
 
     // MSAA relationship extensions to accNavigate
-    case NAVRELATION_CONTROLLED_BY:
-      xpRelation = nsIAccessibleRelation::RELATION_CONTROLLED_BY;
-      break;
-    case NAVRELATION_CONTROLLER_FOR:
-      xpRelation = nsIAccessibleRelation::RELATION_CONTROLLER_FOR;
-      break;
-    case NAVRELATION_LABEL_FOR:
-      xpRelation = nsIAccessibleRelation::RELATION_LABEL_FOR;
-      break;
-    case NAVRELATION_LABELLED_BY:
-      xpRelation = nsIAccessibleRelation::RELATION_LABELLED_BY;
-      break;
-    case NAVRELATION_MEMBER_OF:
-      xpRelation = nsIAccessibleRelation::RELATION_MEMBER_OF;
-      break;
-    case NAVRELATION_NODE_CHILD_OF:
-      xpRelation = nsIAccessibleRelation::RELATION_NODE_CHILD_OF;
-      break;
-    case NAVRELATION_FLOWS_TO:
-      xpRelation = nsIAccessibleRelation::RELATION_FLOWS_TO;
-      break;
-    case NAVRELATION_FLOWS_FROM:
-      xpRelation = nsIAccessibleRelation::RELATION_FLOWS_FROM;
-      break;
-    case NAVRELATION_SUBWINDOW_OF:
-      xpRelation = nsIAccessibleRelation::RELATION_SUBWINDOW_OF;
-      break;
-    case NAVRELATION_EMBEDS:
-      xpRelation = nsIAccessibleRelation::RELATION_EMBEDS;
-      break;
-    case NAVRELATION_EMBEDDED_BY:
-      xpRelation = nsIAccessibleRelation::RELATION_EMBEDDED_BY;
-      break;
-    case NAVRELATION_POPUP_FOR:
-      xpRelation = nsIAccessibleRelation::RELATION_POPUP_FOR;
-      break;
-    case NAVRELATION_PARENT_WINDOW_OF:
-      xpRelation = nsIAccessibleRelation::RELATION_PARENT_WINDOW_OF;
-      break;
-    case NAVRELATION_DEFAULT_BUTTON:
-      xpRelation = nsIAccessibleRelation::RELATION_DEFAULT_BUTTON;
-      break;
-    case NAVRELATION_DESCRIBED_BY:
-      xpRelation = nsIAccessibleRelation::RELATION_DESCRIBED_BY;
-      break;
-    case NAVRELATION_DESCRIPTION_FOR:
-      xpRelation = nsIAccessibleRelation::RELATION_DESCRIPTION_FOR;
-      break;
-    case NAVRELATION_NODE_PARENT_OF:
-      xpRelation = nsIAccessibleRelation::RELATION_NODE_PARENT_OF;
-      break;
+#include "RelationTypeMap.h"
 
     default:
       return E_INVALIDARG;
   }
 
+#undef RELATIONTYPE
+
   pvarEndUpAt->vt = VT_EMPTY;
 
-  if (xpRelation >= 0) {
-    Relation rel = RelationByType(xpRelation);
+  if (!xpRelation.empty()) {
+    Relation rel = RelationByType(xpRelation.ref());
     navAccessible = rel.Next();
   }
 

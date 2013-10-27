@@ -667,7 +667,19 @@ nsContentUtils::Atob(const nsAString& aAsciiBase64String,
     return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
   }
 
-  nsresult rv = Base64Decode(aAsciiBase64String, aBinaryData);
+  const PRUnichar* start = aAsciiBase64String.BeginReading();
+  const PRUnichar* end = aAsciiBase64String.EndReading();
+  nsString trimmedString;
+  if (!trimmedString.SetCapacity(aAsciiBase64String.Length(), fallible_t())) {
+    return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
+  }
+  while (start < end) {
+    if (!nsContentUtils::IsHTMLWhitespace(*start)) {
+      trimmedString.Append(*start);
+    }
+    start++;
+  }
+  nsresult rv = Base64Decode(trimmedString, aBinaryData);
   if (NS_FAILED(rv) && rv == NS_ERROR_INVALID_ARG) {
     return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
   }
@@ -3633,7 +3645,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   if (aNode->IsInDoc()) {
     nsCOMPtr<EventTarget> piTarget(do_QueryInterface(window));
     if (piTarget) {
-      nsEventListenerManager* manager = piTarget->GetListenerManager(false);
+      nsEventListenerManager* manager = piTarget->GetExistingListenerManager();
       if (manager && manager->HasMutationListeners()) {
         return true;
       }
@@ -3644,7 +3656,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   // might not be in our chain.  If we don't have a window, we might have a
   // mutation listener.  Check quickly to see.
   while (aNode) {
-    nsEventListenerManager* manager = aNode->GetListenerManager(false);
+    nsEventListenerManager* manager = aNode->GetExistingListenerManager();
     if (manager && manager->HasMutationListeners()) {
       return true;
     }
@@ -3766,28 +3778,12 @@ nsContentUtils::TraverseListenerManager(nsINode *aNode,
 }
 
 nsEventListenerManager*
-nsContentUtils::GetListenerManager(nsINode *aNode,
-                                   bool aCreateIfNotFound)
+nsContentUtils::GetListenerManagerForNode(nsINode *aNode)
 {
-  if (!aCreateIfNotFound && !aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
-    return nullptr;
-  }
-  
   if (!sEventListenerManagersHash.ops) {
     // We're already shut down, don't bother creating an event listener
     // manager.
 
-    return nullptr;
-  }
-
-  if (!aCreateIfNotFound) {
-    EventListenerManagerMapEntry *entry =
-      static_cast<EventListenerManagerMapEntry *>
-                 (PL_DHashTableOperate(&sEventListenerManagersHash, aNode,
-                                          PL_DHASH_LOOKUP));
-    if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
-      return entry->mListenerManager;
-    }
     return nullptr;
   }
 
@@ -3807,6 +3803,31 @@ nsContentUtils::GetListenerManager(nsINode *aNode,
   }
 
   return entry->mListenerManager;
+}
+
+nsEventListenerManager*
+nsContentUtils::GetExistingListenerManagerForNode(const nsINode *aNode)
+{
+  if (!aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
+    return nullptr;
+  }
+  
+  if (!sEventListenerManagersHash.ops) {
+    // We're already shut down, don't bother creating an event listener
+    // manager.
+
+    return nullptr;
+  }
+
+  EventListenerManagerMapEntry *entry =
+    static_cast<EventListenerManagerMapEntry *>
+               (PL_DHashTableOperate(&sEventListenerManagersHash, aNode,
+                                        PL_DHASH_LOOKUP));
+  if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
+    return entry->mListenerManager;
+  }
+
+  return nullptr;
 }
 
 /* static */
@@ -4557,13 +4578,6 @@ nsContentUtils::GetLocalizedEllipsis()
   return nsDependentString(sBuf);
 }
 
-//static
-WidgetEvent*
-nsContentUtils::GetNativeEvent(nsIDOMEvent* aDOMEvent)
-{
-  return aDOMEvent ? aDOMEvent->GetInternalNSEvent() : nullptr;
-}
-
 static bool
 HasASCIIDigit(const nsTArray<nsShortcutCandidate>& aCandidates)
 {
@@ -4604,7 +4618,7 @@ nsContentUtils::GetAccelKeyCandidates(nsIDOMKeyEvent* aDOMKeyEvent,
     return;
 
   WidgetKeyboardEvent* nativeKeyEvent =
-    static_cast<WidgetKeyboardEvent*>(GetNativeEvent(aDOMKeyEvent));
+    aDOMKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   if (nativeKeyEvent) {
     NS_ASSERTION(nativeKeyEvent->eventStructType == NS_KEY_EVENT,
                  "wrong type of native event");

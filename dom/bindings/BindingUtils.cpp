@@ -326,7 +326,7 @@ InterfaceObjectToString(JSContext* cx, unsigned argc, JS::Value *vp)
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   JS::Rooted<JSObject*> callee(cx, &args.callee());
 
-  if (!args.computeThis(cx).isObject()) {
+  if (!args.thisv().isObject()) {
     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_CONVERT_TO,
                          "null", "object");
     return false;
@@ -341,7 +341,7 @@ InterfaceObjectToString(JSContext* cx, unsigned argc, JS::Value *vp)
   size_t length;
   const jschar* name = JS_GetInternedStringCharsAndLength(jsname, &length);
 
-  if (js::GetObjectJSClass(&args.computeThis(cx).toObject()) != clasp) {
+  if (js::GetObjectJSClass(&args.thisv().toObject()) != clasp) {
     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INCOMPATIBLE_PROTO,
                          NS_ConvertUTF16toUTF8(name).get(), "toString",
                          "object");
@@ -1659,13 +1659,18 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg)
 
   JSAutoCompartment oldAc(aCx, oldParent);
 
-  if (js::GetObjectCompartment(oldParent) ==
-      js::GetObjectCompartment(newParent)) {
+  JSCompartment* oldCompartment = js::GetObjectCompartment(oldParent);
+  JSCompartment* newCompartment = js::GetObjectCompartment(newParent);
+  if (oldCompartment == newCompartment) {
     if (!JS_SetParent(aCx, aObj, newParent)) {
       MOZ_CRASH();
     }
     return NS_OK;
   }
+
+  // Telemetry.
+  xpc::RecordDonatedNode(oldCompartment);
+  xpc::RecordAdoptedNode(newCompartment);
 
   nsISupports* native = UnwrapDOMObjectToISupports(aObj);
   if (!native) {

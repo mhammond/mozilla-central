@@ -24,6 +24,7 @@
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
@@ -901,7 +902,7 @@ TabChild::GetDimensions(uint32_t aFlags, int32_t* aX,
 NS_IMETHODIMP
 TabChild::SetFocus()
 {
-  NS_NOTREACHED("TabChild::SetFocus not supported in TabChild");
+  NS_WARNING("TabChild::SetFocus not supported in TabChild");
 
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -947,7 +948,7 @@ TabChild::GetSiteWindow(void** aSiteWindow)
 NS_IMETHODIMP
 TabChild::Blur()
 {
-  NS_NOTREACHED("TabChild::Blur not supported in TabChild");
+  NS_WARNING("TabChild::Blur not supported in TabChild");
 
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1202,7 +1203,7 @@ TabChild::~TabChild()
     mGlobal = nullptr;
 
     if (mTabChildGlobal) {
-      nsEventListenerManager* elm = mTabChildGlobal->GetListenerManager(false);
+      nsEventListenerManager* elm = mTabChildGlobal->GetExistingListenerManager();
       if (elm) {
         elm->Disconnect();
       }
@@ -2103,7 +2104,7 @@ TabChild::RecvDestroy()
   }
 
   nsCOMPtr<nsIObserverService> observerService =
-    do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
+    mozilla::services::GetObserverService();
 
   observerService->RemoveObserver(this, CANCEL_DEFAULT_PAN_ZOOM);
   observerService->RemoveObserver(this, BROWSER_ZOOM_TO_RECT);
@@ -2240,7 +2241,7 @@ TabChild::InitRenderingState()
     mRemoteFrame = remoteFrame;
 
     nsCOMPtr<nsIObserverService> observerService =
-        do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
+        mozilla::services::GetObserverService();
 
     if (observerService) {
         observerService->AddObserver(this,
