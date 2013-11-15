@@ -6,3 +6,4 @@
 
 BROWSER_CHROME_MANIFESTS += ['browser.ini']
 
+MOCHITEST_MANIFESTS += ['mochitest.ini']
